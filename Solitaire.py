@@ -1,23 +1,26 @@
 CONFIG_OVERRIDE = ""
 
-#IMPORTS
-from copy import copy
-import random
-import sys
-import time
-import os
-from pynput.keyboard import Listener
-from colorama import init, Fore, Back, Style
-import traceback
+INPUT_SYSTEM = "curses"
+'''the game can utilize one of three ways of detecting keyboard and/or mouse presses:   curses: curses libary is required by default to play the game, it is also able to detect mouse click, however it's unable to detect seimulatneous keypresses
+                                                                                        pynput: a windows-only library, can detect multiple keypresses at the same time, however can't utilize the mouse
+                                                                                        keyboard: supposed to work on Linux, may also be able to detect mtultiple simultaneous button presses
+'''
 
-init(autoreset=True)
+#IMPORTS
+#note that the pynput and keyboard modules will only get imported, if they get imported at all, at setup
+from copy import copy
+import curses
+from curses import wrapper
+import random
+import time
+import traceback
 
 #CONFIG
 DEFAULT_RULESET = "klondike-passthroughs-0-turn-1-suits-1-empty_deal-0-winassist-1" 
 '''available games and modifications:   klondike-passthroughs-0-turn-1
                                         spider-suits-1-empty_deal-0
                                         scrolltest
-                                        extras: winassist-1
+                                        extras: winassist-1, color_enabled-1
                                         '''
                                         
 GAMEMODES_TO_SELECT = [
@@ -32,20 +35,20 @@ GAMEMODES_TO_SELECT = [
 
 FRAME_MIN_WAIT = 0.3
 UPDATE_LENGTH = 0.01
-ENABLE_PERFORMANCE_LOGGING = True
+ENABLE_PERFORMANCE_LOGGING = False
 FORCE_START_LINES_COLORED = False #prevents color overflow in case part of a pile is chopped off, at the price of some marginal performance
 
 #KEYBINDINGS
-INTERACT_KEYS = ["Key.space", "Key.enter"]
-QUICK_ACTION_KEYS = ["Key.shift", "Key.backspace"]
-FORWARD_KEYS = ["'w'", "Key.up"]
-BACKWARD_KEYS = ["'s'", "Key.down"]
-RIGHT_KEYS = ["'d'", "Key.right"]
-LEFT_KEYS = ["'a'", "Key.left"]
-RESTART_KEYS = ["'r'"]
-ESCAPE_KEYS = ["Key.esc"]
-NUMBER_KEYS = [["'1'"], ["'2'"], ["'3'"], ["'4'"], ["'5'"], ["'6'"], ["'7'"], ["'8'"], ["'9'"]]  
-MODIFY_KEYS = ["Key.alt_l"]
+INTERACT_KEYS = ["Key.space", "Key.enter", "space", "enter", " "]
+QUICK_ACTION_KEYS = ["Key.shift", "Key.backspace", "shift", "backspace"]
+FORWARD_KEYS = ["'w'", "Key.up", "w", "up"]
+BACKWARD_KEYS = ["'s'", "Key.down", "s", "down"]
+RIGHT_KEYS = ["'d'", "Key.right", "d", "right"]
+LEFT_KEYS = ["'a'", "Key.left", "a", "left"]
+RESTART_KEYS = ["'r'", "r"]
+ESCAPE_KEYS = ["Key.esc", "esc", "^[", "\x1b"]
+NUMBER_KEYS = [["'1'"], ["'2'"], ["'3'"], ["'4'"], ["'5'"], ["'6'"], ["'7'"], ["'8'"], ["'9'"]] + list(map(str, range(1, 9 + 1)))
+MODIFY_KEYS = ["Key.alt_l", "alt"]
 
 #NAVIGATION
 JUMP_OVER_EMPTY_PILES = True
@@ -53,18 +56,21 @@ OVER_SCROLL = 1
 
 #GRAPHICS
 #COLORS
-BACKGROUND_COLOR = Back.GREEN
-CARD_BACKGROUND_COLOR = Back.LIGHTWHITE_EX
-EMPTY_PILE_COLOR = Back.LIGHTGREEN_EX
-HIGHLIGHTED_COLOR = Back.BLUE
-SELECTED_COLOR = Back.YELLOW
-CARD_TEXT_COLOR = Fore.BLACK
+COLORS = {"BLACK" : 0, "BLUE" : 1, "GREEN" : 2, "CYAN" : 3, "RED" : 4, "MAGENTA" : 5, "YELLOW" : 6, "WHITE" : 7,
+        "LIGHTBLACK" : 8, "LIGHTBLUE" : 9, "LIGHTGREEN" : 10, "LIGHTCYAN" : 11, "LIGHTRED" : 12, "LIGHTMAGENTA" : 13, "LIGHTYELLOW" : 14, "LIGHTWHITE" : 15}
 
-COLORS = [Fore.BLACK, Fore.BLUE, Fore.CYAN, Fore.GREEN, Fore.MAGENTA, Fore.RED, Fore.WHITE, Fore.YELLOW, Fore.LIGHTBLACK_EX, Fore.LIGHTBLUE_EX, Fore.LIGHTCYAN_EX, Fore.LIGHTGREEN_EX, Fore.LIGHTMAGENTA_EX, Fore.LIGHTRED_EX, Fore.LIGHTWHITE_EX, Fore.LIGHTYELLOW_EX,\
-    Back.BLACK, Back.BLUE, Back.CYAN, Back.GREEN, Back.MAGENTA, Back.RED, Back.WHITE, Back.YELLOW, Back.LIGHTBLACK_EX, Back.LIGHTBLUE_EX, Back.LIGHTCYAN_EX, Back.LIGHTGREEN_EX, Back.LIGHTMAGENTA_EX, Back.LIGHTRED_EX, Back.LIGHTWHITE_EX, Back.LIGHTYELLOW_EX]
+COLORING_FORMAT = "&c"
+
+BACKGROUND_COLOR = "GREEN"
+CARD_BACKGROUND_COLOR = "LIGHTWHITE"
+EMPTY_PILE_COLOR = "LIGHTGREEN"
+HIGHLIGHTED_COLOR = "BLUE"
+SELECTED_COLOR = "YELLOW"
+CARD_TEXT_COLOR = "BLACK"
+DEBUG_TEXT_COLOR = "LIGHTWHITE"
 
 #CARD DATA
-CARD_SUITS = [["♠", Fore.BLACK], ["♥", Fore.LIGHTRED_EX], ["♣", Fore.BLACK], ["♦", Fore.LIGHTRED_EX]]
+CARD_SUITS = [["♠", "BLACK"], ["♥", "LIGHTRED"], ["♣", "BLACK"], ["♦", "LIGHTRED"]]
 CARD_RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "0", "J", "Q", "K"]
 
 #SPACING
@@ -73,7 +79,7 @@ SPACE_BETWEEN_PILES = 3
 SCREEN_BORDER_WIDTH = 1
 
 #CARD DIMENSIONS
-RENDER_HEIGHT = 29 - ENABLE_PERFORMANCE_LOGGING#53
+RENDER_HEIGHT = 30 - ENABLE_PERFORMANCE_LOGGING#53
 RENDER_WIDTH = 119#210
 CARD_HEIGHT = 6
 CARD_WIDTH = 9
@@ -114,6 +120,7 @@ CARD_EMPTY = """
 FACE_UP_DEBUG = False
 
 #VARIABLES
+#cursos data
 cursor_position = 0, 0 #horizontal, verical
 pile_position = 0 #card position inside pile
 
@@ -121,8 +128,11 @@ pile_position = 0 #card position inside pile
 is_selected = False
 selected_position = 0, 0
 selected_pile_position = 0 
+last_click_position = 0, 0, 0
 
 scroll_offset = 0
+
+color_pairs = [[-1, -1]]
 
 #rules
 gamemode = "klondike"
@@ -136,6 +146,11 @@ win_assist = True
 
 should_render = True #gets set to false after each render, is set to true when something changes and needs to be rendered
 has_won = False
+color_enabled = True
+
+#debug and crash dumps
+crash_dump_text = ""
+logged_text = ""
  
 #CLASSES
 class Pile:
@@ -155,7 +170,7 @@ class Pile:
         removed_cards = self.cards[-number_of_cards:]
         self.cards = self.cards[:-number_of_cards]
         if self.pile_type in "tableau":
-            self.face_down = min(self.face_down, len(self.cards) - 1)
+            self.face_down = min(self.face_down, max(len(self.cards) - 1, 0))
 
         return removed_cards
 
@@ -201,19 +216,19 @@ class Pile:
                     return CARD_FRONT[0]
             #card slices
             if line_number <= (self.card_count() - 1) * SLICE_HEIGHT + 1:
-                face_down = ((line_number - 2) // SLICE_HEIGHT + 1 <= self.face_down)
+                is_face_down = ((line_number - 2) // SLICE_HEIGHT + 1 <= self.face_down)
 
                 slice_index = (line_number - 2) % SLICE_HEIGHT
                 card_index = (line_number - 2) // SLICE_HEIGHT
                 
-                if face_down:
+                if is_face_down:
                     return self.format_card_line(CARD_BACK_SLICE[slice_index], None, card_background_color)
                 else:
                     return self.format_card_line(CARD_FRONT_SLICE[slice_index], self.cards[-self.card_count() + card_index], card_background_color)
             #top cards
             elif line_number <= + CARD_HEIGHT + (self.card_count() - 1) * SLICE_HEIGHT:
-                face_down = (self.card_count() * SLICE_HEIGHT <= self.face_down)
-                if face_down:
+                is_face_down = (self.card_count() * SLICE_HEIGHT <= self.face_down)
+                if is_face_down:
                     return self.format_card_line(CARD_BACK[line_number - self.card_count()], None, card_background_color)
                 else:
                     return self.format_card_line(CARD_FRONT[(line_number - 1) - SLICE_HEIGHT * (self.card_count() - 1)], self.cards[-1], card_background_color)
@@ -224,9 +239,10 @@ class Pile:
     def format_card_line(self, line, card, card_background_color):
         #this function was originally meant to render the rank, the suit and its respective font color on the card line,
         #however now it handles the background coloring as well, sorry... :(
-        line = line.replace("(b)", BACKGROUND_COLOR).replace("(n)", card_background_color)
+        #what's more now you've gotta use the format color function too just because fuck you
+        line = line.replace("(b)", format_color(BACKGROUND_COLOR, "b")).replace("(n)", format_color(card_background_color, "b"))
         if card != None:
-             line = line.replace("#", card.COLOR() + card.SUIT() + CARD_TEXT_COLOR).replace("?", card.COLOR() + card.RANK() + CARD_TEXT_COLOR)
+             line = line.replace("#", format_color(card.COLOR(), "f") + card.SUIT() + format_color(CARD_TEXT_COLOR, "f")).replace("?", format_color(card.COLOR(), "f") + card.RANK() + format_color(CARD_TEXT_COLOR, "f"))
         return line
 
     def card_count(self):
@@ -272,28 +288,53 @@ def select_gamemode():
 
     number_of_gamemodes = len(GAMEMODES_TO_SELECT) + 1
 
+    text_mode(True)
+
     while True:
-        clear_screen()
-        print("Choose a gamemode")
+        stdscr.clear()
+        stdscr.addstr(0, 0, "Select a gamemode:")
+
         for i, gamemode in enumerate(GAMEMODES_TO_SELECT):
-            print(f"{i + 1}) {gamemode[1]}")
-        print(f"{number_of_gamemodes}) custom ruleset")
+            stdscr.addstr(i + 1, 0, f"{i + 1}) {gamemode[1]}")
+        stdscr.addstr(number_of_gamemodes, 0, f"{number_of_gamemodes}) custom ruleset")
+        stdscr.refresh()
 
-        selected_gamemode = input()
-
+        selected_gamemode = stdscr.getstr(number_of_gamemodes + 1, 0).decode()
+        
         if selected_gamemode in map(str, range(1, number_of_gamemodes)):
             read_ruleset(GAMEMODES_TO_SELECT[int(selected_gamemode) - 1][0])
             break
         
         elif selected_gamemode == str(number_of_gamemodes):
-            custom_ruleset = input()
+            stdscr.clear()
+            stdscr.addstr(0, 0, "Add custom rules:")
+            custom_ruleset = stdscr.getstr(1, 0).decode()
+
             read_ruleset(DEFAULT_RULESET)
             read_ruleset(custom_ruleset)
             break
+    
+    text_mode(False)
 
     pressed_down_keys = []
 
-def setup_keyboard_listener():
+def init_curses(stdscr_instance):
+    #makes stdscr globally accesible for all functions
+    global stdscr
+
+    stdscr = stdscr_instance
+
+    curses.cbreak()
+    curses.noecho()
+    
+    curses.curs_set(0) 
+    stdscr.keypad(1) 
+    curses.mousemask(1)
+    
+    curses.resize_term(RENDER_HEIGHT, RENDER_WIDTH + 1)
+    curses.start_color()
+    
+def setup_input_listener():
     global pressed_keys, pressed_down_keys
 
     pressed_keys = []
@@ -308,8 +349,23 @@ def setup_keyboard_listener():
         if pressed_keys.__contains__(str(key)):
             pressed_keys.remove(str(key))
 
-    keyboard_listener = Listener(on_press=on_press, on_release=on_release)
-    keyboard_listener.start()
+    if INPUT_SYSTEM == "pynput":
+        from pynput.keyboard import Listener as KeyboardListener
+        keyboard_listener = KeyboardListener(on_press=on_press, on_release=on_release)
+        keyboard_listener.start()
+
+    elif INPUT_SYSTEM == "keyboard":
+        import keyboard
+        from keyboard._keyboard_event import KEY_DOWN, KEY_UP
+
+        def on_action(event):
+            if event.event_type == KEY_DOWN:
+                on_press(event.name)
+
+            elif event.event_type == KEY_UP:
+                on_release(event.name)
+
+        keyboard.hook(lambda e: on_action(e))
 
 def setup_card_textures():
     global CARD_FRONT, CARD_FRONT_SLICE, CARD_BACK, CARD_BACK_SLICE, CARD_EMPTY
@@ -330,7 +386,7 @@ def setup_card_textures():
     CARD_EMPTY.remove("")
 
 def read_ruleset(ruleset):
-    global gamemode, waste_size, max_passthroughs, suits, empty_deal, win_assist
+    global gamemode, waste_size, max_passthroughs, suits, empty_deal, win_assist, color_enabled
 
     ruleset = ruleset.replace(" ", "").replace("\n", "").replace("_", "").lower().split("-")
 
@@ -353,6 +409,18 @@ def read_ruleset(ruleset):
         elif rule == "winassist":
             win_assist = int(ruleset[i+1]) == 1
 
+        elif rule == "colorenabled":
+            color_enabled = int(ruleset[i+1]) == 1
+
+def text_mode(enable):
+    if enable:
+        curses.echo()
+        curses.nocbreak()
+
+    else:
+        curses.noecho()
+        curses.cbreak()
+
 #game loop 
 def read_input():
     def overlap(list1, list2):
@@ -366,11 +434,31 @@ def read_input():
         else:
             return overlap(pressed_keys, keys)
 
-    global input_direction, interact_input, pressed_down_keys, number_input, modify_input
+    global input_direction, interact_input, pressed_keys, pressed_down_keys, number_input, modify_input
 
     input_direction = 0, 0
     interact_input = None
     number_input = 0
+    modify_input = None
+
+    #handles input from curses, mouse included
+    #curses can only detect a single keypress at a time, so the list of pressed keys can be simply overwritten
+    if INPUT_SYSTEM == "curses":
+        curses.flushinp()
+        char = stdscr.getch()
+
+        if char == curses.KEY_MOUSE:
+            handle_mouse_click()
+
+        else:
+            key = str(chr(char))
+
+            pressed_keys = [key]
+            pressed_down_keys = [key]
+
+            #global logged_text, should_render
+            #should_render = True
+            #logged_text = str(pressed_keys) + str(pressed_down_keys)
 
     if key_press(ESCAPE_KEYS, press_type="down"):
         interact_input = "escape"
@@ -397,6 +485,29 @@ def read_input():
     modify_input = key_press(MODIFY_KEYS)
 
     pressed_down_keys = []
+
+def handle_mouse_click():
+    global cursor_position, pile_position, selected_position, selected_pile_position, is_selected, should_render, interact_input, pressed_keys, last_click_position
+
+    pressed_keys = []
+    _, mx, my,_, _ = curses.getmouse()
+
+    click_position = screen_to_card_position(mx, my)
+
+    if click_position[0] == -1 or click_position[1] == -1 or click_position[2] == -1:
+        return
+
+    cursor_position = click_position[0], click_position[1]
+    pile_position = click_position[2]
+
+    if last_click_position == click_position:
+        interact_input = "quick_action"
+
+    else:
+        interact_input = "interact"
+    
+    last_click_position = click_position
+    should_render = True
 
 def handle_input():
     global should_render, cursor_position, pile_position, is_selected, selected_position, selected_pile_position
@@ -538,8 +649,6 @@ def handle_scrolling():
             end = start + SLICE_HEIGHT - 1
         
         return start, end
-
-
     global scroll_offset
 
     card_boundries = highlighted_boundries()
@@ -550,20 +659,27 @@ def handle_scrolling():
         scroll_offset = card_boundries[0]
 
     #bottom of screen is aligned with the bottom of highlighted card
-    elif card_boundries[1] > screen_boundries[1]:
-        scroll_offset = card_boundries[1] - screen_boundries[1] + OVER_SCROLL
+    #if scrolling breaks, then likely these two lines are at fault
+    elif card_boundries[1] > screen_boundries[1] - OVER_SCROLL:
+        scroll_offset = card_boundries[1] - RENDER_HEIGHT + 1 + OVER_SCROLL
 
 def try_win_assist():
     if not win_assist:
         return False
 
     if gamemode == "klondike":
-        if len(find_piles_by_type("stock")[0].cards) == 0 and len(find_piles_by_type("waste")[0].cards) == 0:
-            for tableau in find_piles_by_type("tableau"):
-                for foundation in find_piles_by_type("foundation"):
-                    if can_move_cards(tableau, tableau.card_count() - 1, foundation):
-                        move_cards(tableau, tableau.card_count() - 1, foundation)
-                        return True
+        if len(find_piles_by_type("stock")[0].cards) != 0 or len(find_piles_by_type("waste")[0].cards) != 0:
+            return False
+
+        for tableau in find_piles_by_type("tableau"):
+            if tableau.face_down != 0:
+                return False
+
+        for tableau in find_piles_by_type("tableau"):
+            for foundation in find_piles_by_type("foundation"):
+                if can_move_cards(tableau, tableau.card_count() - 1, foundation):
+                    move_cards(tableau, tableau.card_count() - 1, foundation)
+                    return True
 
     elif gamemode == "spider":
         for tableau in find_piles_by_type("tableau"):
@@ -590,42 +706,22 @@ def try_win_assist():
 
 def render():
     #constructing the render buffer virtually takes no time, the main performance bottlenecks are the print and clean calls
-    def height_of_row(pile_line):
-        #get the height of the highest pile in the row
-        max_height = 1
-
-        for pile in pile_line:
-            if pile != None and pile.get_height() > max_height:
-                max_height = pile.get_height() + LINES_BETWEEN_ROWS
-
-        return max_height
-
-    def update_row_starts():
-        global row_starts
-        row_starts = []
-
-        current_line = 0
-
-        for row in piles:
-            row_starts.append(current_line)
-            row_height = height_of_row(row)
-            current_line += row_height
+    #or at least it was, before I implemented curses, so now only god knows...
 
     def colored_string_to_buffer(string):
         buffer = []
 
         i = 0
         new_element = True
-
+        
         while i < len(string):
             element = string[i]
             has_found_color = False
 
-            for color in COLORS:
-                if string[i:i+len(color)] == color:
-                    element = color
-                    has_found_color = True
-                    break
+            #color check
+            if string[i : i + len(COLORING_FORMAT)] == COLORING_FORMAT:
+                element = string[i : i + len(COLORING_FORMAT) + 2]
+                has_found_color = True
 
             if new_element:
                 buffer.append(element)
@@ -637,11 +733,24 @@ def render():
 
         return buffer
 
-    update_row_starts()
+    def parse_buffer_element(string):
+        foreground_color = None
+        background_color = None
+
+        colors = string[:-1].split(COLORING_FORMAT)
+
+        for i in range(1, len(colors)):
+            color = colors[i]
+
+            if color[1] == "f":
+                foreground_color = int(ord(color[0]))
+
+            elif color[1] == "b":
+                background_color = int(ord(color[0]))
+
+        return string[-1], foreground_color, background_color
     
     handle_scrolling()
-
-    clear_screen()
     
     render_buffer = []
     
@@ -649,7 +758,7 @@ def render():
         row = []
         for i in range(RENDER_WIDTH):
             if i == 0 and (height == 0 or FORCE_START_LINES_COLORED):
-                row.append(BACKGROUND_COLOR + CARD_TEXT_COLOR + " ")
+                row.append(" ")
             else:
                 row.append(" ")
 
@@ -677,51 +786,92 @@ def render():
 
                             render_buffer[y_pos][x_pos + i] = str(card_line_buffer[i])
     
-    to_print = ""
+    #display buffer on screen
+    foreground_color = get_color(CARD_TEXT_COLOR)
+    background_color = get_color(BACKGROUND_COLOR)
+    if color_enabled:
+        curses.init_pair(10, foreground_color, background_color)
+
     for i, row in enumerate(render_buffer):
-        to_print += ("".join(row))
-        to_print += "\n"
-    
-    print(to_print, end="")
+        for j, element in enumerate(row):
+            char, fore, back = parse_buffer_element(element)
+
+            if fore != None:
+                foreground_color = fore
+            if back != None:
+                background_color = back
+
+            if color_enabled:
+                stdscr.addstr(i, j, char, get_color_pair(foreground_color, background_color))
+            else:
+                stdscr.addstr(i, j, char)
 
     if ENABLE_PERFORMANCE_LOGGING:
-        print(f"Frame render time: {float.__round__((time.time() - update_start_time)*1000)}ms", end="")    
+        frame_time = time.time() - update_start_time
+        text = f"Frame render time: {float.__round__(frame_time*1000)}ms {logged_text}"
+        if color_enabled:
+            stdscr.addstr(RENDER_HEIGHT - 1, 0, text, get_color_pair(DEBUG_TEXT_COLOR, BACKGROUND_COLOR))   
+        else:
+            stdscr.addstr(RENDER_HEIGHT - 1, 0, text)
+    
+    stdscr.refresh()
 
-def main():
+def main(stdscr):
     global should_render, update_start_time, last_render_time
 
-    setup_keyboard_listener()
-    setup_card_textures()
+    try:
+        init_curses(stdscr)
 
-    select_gamemode()
-    reset_game_state()
+        setup_input_listener()
+        setup_card_textures()
 
-    should_render = True
-    last_render_time = 0
+        select_gamemode()
+        reset_game_state()
+        
+        should_render = True
+        last_render_time = 0
 
-    while True:
-        update_start_time = time.time()
+        while True:
+            update_start_time = time.time()
 
-        if last_render_time + FRAME_MIN_WAIT <= time.time():
-            #if winassist is enabled, tries to complete automatic moves
-            if try_win_assist():
-                should_render = True
+            if last_render_time + FRAME_MIN_WAIT <= time.time():
+                #if winassist is enabled, tries to complete automatic moves
+                if try_win_assist():
+                    should_render = True
 
-            #otherwise rely on player input
-            else:
-                read_input()
-                handle_input()     
+                #otherwise rely on player input
+                else:
+                    read_input()
+                    handle_input()     
 
-            #if something has changed render
-            if should_render:
-                render()
-                should_render = False
-                last_render_time = time.time()
+                #if something has changed render
+                if should_render:
+                    render()
+                    should_render = False
+                    last_render_time = time.time()
 
-            #check if the game has been won
-            check_victory()
+                #check if the game has been won
+                check_victory()
 
-        time.sleep(max(UPDATE_LENGTH - (time.time() - update_start_time), 0))
+            #curses based input seems to work better with timing disabled
+            if INPUT_SYSTEM != "curses":
+                sleep_time = max(UPDATE_LENGTH - (time.time() - update_start_time), 0) 
+                time.sleep(sleep_time)
+
+    #create crashdump file when game crashes
+    except Exception as e:
+        #create dump file
+        crash_dump = open("solitaire_crashdump.txt", "w")
+        crash_dump.write(f"Game has crashed. Exception: {e} If you're not the developer, please make sure to send him the exception!\n")
+        crash_dump.write(f"Detailed exception:\n{traceback.format_exc()}")
+        crash_dump.write(f"Additional information: {crash_dump_text}")
+        crash_dump.close()
+
+        #warn user
+        stdscr.clear()
+        stdscr.addstr(0, 0, "Program crashed! See crashdump for details.")
+        stdscr.refresh()
+        stdscr.getkey()
 
 #game state
 def restart_game():
@@ -835,6 +985,8 @@ def deal_cards():
                 piles[y].append(pile)
                 i += number_of_cards
 
+    update_row_starts()
+
 #cards
 def can_select(pile, pile_position):
     if len(pile.cards) < 1 or pile == None or pile.face_down > pile_position:
@@ -889,7 +1041,7 @@ def can_move_cards(from_pile, from_pile_position, to_pile):
         #check if card belongs to a pile with a full set
         if to_pile.pile_type == "foundation" and len(to_pile.cards) == 0 and len(from_pile.cards) - from_pile_position == 13 and from_pile.cards[from_pile_position].rank == 13:
             for card_i in range(pile_position + 1, len(from_pile.cards)):
-                if from_pile.cards[card_i - 1].rank != from_pile.cards[card_i].rank + 1 or from_pile.cards[card_i].suit != from_pile.cards[card_i].suit:
+                if from_pile.cards[card_i - 1].rank != from_pile.cards[card_i].rank + 1 or from_pile.cards[card_i - 1].suit != from_pile.cards[card_i].suit:
                     return False
 
             return True
@@ -900,7 +1052,7 @@ def can_move_cards(from_pile, from_pile_position, to_pile):
 
         #placing cards on a tableau pile
         elif to_pile.pile_type == "tableau":
-            return to_pile.cards[-1].rank == from_pile.get_card(from_pile_position).rank + 1 and to_pile.cards[-1].suit == from_pile.get_card(from_pile_position).suit
+            return to_pile.cards[-1].rank == from_pile.get_card(from_pile_position).rank + 1
 
     return False
 
@@ -908,7 +1060,10 @@ def move_cards(from_pile, from_pile_position, to_pile):
     global is_selected, should_render
 
     to_pile.add(from_pile.remove_from_top(from_pile.card_count() - from_pile_position))
+
     should_render = True
+
+    update_row_starts()
 
 def check_victory():
     global has_won
@@ -922,8 +1077,7 @@ def check_victory():
         has_won = True
 
     if has_won:
-        print("\nCongrats, you've won!")
-        input()
+        stdscr.getch()
 
         has_won = False
         restart_game()
@@ -963,14 +1117,44 @@ def deal_stock():
         should_render = True
 
     is_selected = False
+    update_row_starts()
+
+def screen_to_card_position(x, y):
+    card_position = -1, -1, -1
+
+    #check horizontally
+    for card_x in range(len(piles[0])):
+        card_x_boundries = SCREEN_BORDER_WIDTH + card_x * (CARD_WIDTH + SPACE_BETWEEN_PILES), SCREEN_BORDER_WIDTH + CARD_WIDTH + (card_x) * (CARD_WIDTH + SPACE_BETWEEN_PILES) - 1
+
+        if card_x_boundries[0] <= x <= card_x_boundries[1]:
+            card_position = card_x, -1, -1
+
+    y += scroll_offset
+
+    #checks vertically
+    #also checks for the card position in the pile, not just for the pile's y position
+    for card_y in range(len(piles)):
+        #skips over pile if empty
+        pile = piles[card_y][card_position[0]]
+        if pile == None:
+            continue
+
+        card_y_boundries = row_starts[card_y], row_starts[card_y] + pile.get_height() - 1
+
+        if card_y_boundries[0] <= y <= card_y_boundries[1]:
+            card_position = card_position[0], card_y, -1
+           
+           #if the selected part is the bottom card of the pile
+            if y > row_starts[card_y] + pile.get_height() - 1 - (CARD_HEIGHT - 1):
+                card_position = card_position[0], card_position[1], pile.card_count() -1
+
+            #and if it's not
+            else:
+                card_position = card_position[0], card_position[1], (y - row_starts[card_y] - 1) // SLICE_HEIGHT
+
+    return card_position
 
 #util
-def clear_screen():
-    if os.name == "nt":
-        os.system("cls")
-    else:
-        os.system("clear")
-
 def find_piles_by_type(pile_type):
     found_piles = []
 
@@ -987,12 +1171,55 @@ def highlighted_pile():
 def selected_pile():
     return piles[selected_position[1]][selected_position[0]]
 
+def height_of_row(pile_line):
+    #get the height of the highest pile in the row
+    #takes the pile slice as an input, instead of the index, perhaps later on I'll fix it
+    #...or perhaps not...
+
+    max_height = 1
+
+    for pile in pile_line:
+        if pile != None and pile.get_height() > max_height:
+            max_height = pile.get_height() + LINES_BETWEEN_ROWS
+
+    return max_height
+
+def update_row_starts():
+    global row_starts
+    row_starts = []
+
+    current_line = 0
+
+    for row in piles:
+        row_starts.append(current_line)
+        row_height = height_of_row(row)
+        current_line += row_height
+
+def get_color(color):
+    if type(color) is int:
+        return color
+
+    return COLORS[color]
+
+def get_color_pair(fore, back):
+    fore, back = get_color(fore), get_color(back)
+
+    for i in range(len(color_pairs)):
+        if color_pairs[i][0] == fore and color_pairs[i][1] == back:
+            return curses.color_pair(i)
+
+    curses.init_pair(len(color_pairs), fore, back)
+    color_pairs.append([fore, back])
+    return curses.color_pair(len(color_pairs) - 1)
+
+def format_color(color, layer):
+    #layer is either f or b
+    #color number(0-255) is encoded as an ascii character in order to maintain constant length
+    if curses.has_colors():
+        return COLORING_FORMAT + chr(get_color(color)) + layer
+    else:
+        return ""
+
 #main
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        print(Fore.RED + f"Game has crashed. Exception: {e} If you're not the developer, please make sure to send him the exception!")
-        print(Fore.WHITE + f"Detailed exception:\n{traceback.format_exc()}")
-        while True:
-            input()
+    wrapper(main)
